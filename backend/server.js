@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { URL } = require("url");
 
 const PORT = process.env.PORT || 3000;
@@ -8,6 +9,28 @@ const ROOT = path.join(__dirname, "..");
 const DB_PATH = path.join(ROOT, "data", "db.json");
 const PUBLIC_PATH = path.join(ROOT, "frontend", "public");
 const SRC_PATH = path.join(ROOT, "frontend", "src");
+
+const defaultCollections = {
+  users: [],
+  venues: [],
+  bookings: [],
+  events: [],
+  tasks: [],
+  budgets: [],
+  expenses: [],
+  vendors: [],
+  sourcingRequests: [],
+  deliveries: [],
+  invoices: [],
+  guests: [],
+  messages: [],
+  feedback: [],
+  layouts: [],
+  notifications: [],
+  sessions: [],
+  outbox: [],
+  reports: []
+};
 
 const jsonHeaders = {
   "Content-Type": "application/json",
@@ -17,7 +40,7 @@ const jsonHeaders = {
 };
 
 function readDb() {
-  return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  return { ...defaultCollections, ...JSON.parse(fs.readFileSync(DB_PATH, "utf8")) };
 }
 
 function writeDb(db) {
@@ -29,12 +52,37 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function publicUser(user) {
+  const { passwordHash, ...safeUser } = user;
+  return safeUser;
+}
+
+function hashPassword(password) {
+  return crypto.createHash("sha256").update(String(password)).digest("hex");
+}
+
+function token() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
+function reportPayload(db) {
+  const summary = buildSummary(db);
+  return {
+    generatedAt: new Date().toISOString(),
+    summary,
+    costs: [...db.budgets, ...db.expenses],
+    attendance: db.guests,
+    bookings: db.bookings,
+    feedback: db.feedback
+  };
+}
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
     req.on("data", chunk => {
       raw += chunk;
-      if (raw.length > 1_000_000) {
+      if (raw.length > 8_000_000) {
         reject(new Error("Request body is too large."));
       }
     });
@@ -164,8 +212,68 @@ async function handleApi(req, res, url) {
   const id = parts[2];
 
   try {
+    if (url.pathname === "/api/auth/login" && req.method === "POST") {
+      const payload = await parseBody(req);
+      const user = db.users.find(item =>
+        item.email.toLowerCase() === String(payload.email || "").toLowerCase() &&
+        item.role === payload.role &&
+        item.status !== "Inactive"
+      );
+      const expectedHash = user?.passwordHash || hashPassword("password123");
+      if (!user || expectedHash !== hashPassword(payload.password || "")) {
+        sendJson(res, 401, { error: "Invalid email, role, or password." });
+        return;
+      }
+      const session = { id: `session-${Date.now()}`, userId: user.id, token: token(), createdAt: new Date().toISOString() };
+      db.sessions = db.sessions || [];
+      db.sessions.push(session);
+      writeDb(db);
+      sendJson(res, 200, { user: publicUser(user), session });
+      return;
+    }
+
+    if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      const payload = await parseBody(req);
+      if (!payload.name || !payload.email || !payload.role || !payload.password) {
+        sendJson(res, 400, { error: "Name, email, role, and password are required." });
+        return;
+      }
+      const exists = db.users.some(item => item.email.toLowerCase() === String(payload.email).toLowerCase());
+      if (exists) {
+        sendJson(res, 409, { error: "An account with this email already exists." });
+        return;
+      }
+      const user = {
+        id: `user-${Date.now()}`,
+        name: payload.name,
+        email: payload.email,
+        role: payload.role,
+        speciality: payload.speciality || "",
+        company: payload.company || "",
+        status: "Active",
+        passwordHash: hashPassword(payload.password),
+        createdAt: new Date().toISOString()
+      };
+      db.users.push(user);
+      writeDb(db);
+      sendJson(res, 201, publicUser(user));
+      return;
+    }
+
     if (url.pathname === "/api/summary" && req.method === "GET") {
       sendJson(res, 200, buildSummary(db));
+      return;
+    }
+
+    if (url.pathname === "/api/reports/full" && req.method === "GET") {
+      const report = {
+        id: `report-${Date.now()}`,
+        name: "Comprehensive event report",
+        ...reportPayload(db)
+      };
+      db.reports.push(report);
+      writeDb(db);
+      sendJson(res, 200, report);
       return;
     }
 
@@ -176,7 +284,7 @@ async function handleApi(req, res, url) {
 
     if (req.method === "GET") {
       const records = db[resource].filter(item => matchesFilters(item, url.searchParams));
-      sendJson(res, 200, records);
+      sendJson(res, 200, resource === "users" ? records.map(publicUser) : records);
       return;
     }
 
@@ -188,9 +296,24 @@ async function handleApi(req, res, url) {
         createdAt: now,
         ...payload
       };
+      if (resource === "users" && payload.password) {
+        record.passwordHash = hashPassword(payload.password);
+        delete record.password;
+      }
+      if (resource === "messages") {
+        db.outbox.push({
+          id: `outbox-${Date.now()}`,
+          type: "message",
+          recipientGroup: record.audience || "Guests",
+          subject: "Event update",
+          body: record.body,
+          status: "Queued",
+          createdAt: now
+        });
+      }
       db[resource].push(record);
       writeDb(db);
-      sendJson(res, 201, record);
+      sendJson(res, 201, resource === "users" ? publicUser(record) : record);
       return;
     }
 
@@ -202,9 +325,13 @@ async function handleApi(req, res, url) {
 
     if (req.method === "PATCH") {
       const payload = await parseBody(req);
+      if (resource === "users" && payload.password) {
+        payload.passwordHash = hashPassword(payload.password);
+        delete payload.password;
+      }
       db[resource][index] = { ...db[resource][index], ...payload, updatedAt: new Date().toISOString() };
       writeDb(db);
-      sendJson(res, 200, db[resource][index]);
+      sendJson(res, 200, resource === "users" ? publicUser(db[resource][index]) : db[resource][index]);
       return;
     }
 

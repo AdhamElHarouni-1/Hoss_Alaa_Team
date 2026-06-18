@@ -44,3 +44,7 @@ The assistant updated the frontend so the application now opens with login/regis
 ## Missing Requirements Follow-Up
 
 The user reported that requirements were still missing. The assistant added more journey coverage: organizer stakeholder account management, staff filtering, task creation, budget/expense creation, sourcing request creation, guest/vendor filtering, invoice approval/payment, dashboard notifications, guest message seen status, vendor delivery filtering and delay notes, venue availability editing, listing removal, booking request filtering, and a requirements coverage document.
+
+## Full Requirements Follow-Up
+
+The user asked to include everything without simplifying. The assistant added backend password authentication, server report generation, communication outbox records, real venue photo/floor-plan file uploads stored in the database, scannable QR-code images, floor-plan SVG image export, calendar views, and updated seed data with password hashes and upload-ready venue records. The assistant noted that actual external email/SMS delivery requires provider credentials.

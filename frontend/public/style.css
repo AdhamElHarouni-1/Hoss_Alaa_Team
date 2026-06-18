@@ -388,6 +388,7 @@ textarea {
 .qr-card {
   display: grid;
   place-items: center;
+  gap: 10px;
   min-height: 150px;
   border: 2px solid #111827;
   border-radius: 8px;
@@ -398,6 +399,62 @@ textarea {
   font-size: clamp(20px, 4vw, 34px);
   font-weight: 900;
   text-align: center;
+}
+
+.qr-card img {
+  width: 180px;
+  height: 180px;
+  background: white;
+  border: 8px solid white;
+}
+
+.uploaded-photo {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin: 8px 0;
+}
+
+.upload-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar strong,
+.calendar-cell {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: white;
+  min-height: 42px;
+}
+
+.calendar-cell {
+  min-height: 100px;
+}
+
+.calendar-cell span {
+  display: block;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.calendar-cell small {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3730a3;
 }
 
 .status-line {

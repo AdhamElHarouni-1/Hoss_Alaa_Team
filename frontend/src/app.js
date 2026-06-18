@@ -17,7 +17,9 @@ const resources = [
   "messages",
   "feedback",
   "layouts",
-  "notifications"
+  "notifications",
+  "outbox",
+  "reports"
 ];
 
 const rolePages = {
@@ -98,6 +100,55 @@ function downloadFile(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function qrUrl(value) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(value)}`;
+}
+
+function floorPlanSvg(layout) {
+  const items = layout.elements.map(item => {
+    const x = item.x * 8;
+    const y = item.y * 4;
+    return `<rect x="${x - 38}" y="${y - 18}" width="76" height="36" rx="6" fill="white" stroke="#111827" stroke-width="2"/><text x="${x}" y="${y + 5}" font-family="Arial" font-size="12" text-anchor="middle" font-weight="700">${item.label}</text>`;
+  }).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400"><rect width="800" height="400" fill="#f8fafc"/><path d="M0 40H800M0 80H800M0 120H800M0 160H800M0 200H800M0 240H800M0 280H800M0 320H800M0 360H800M80 0V400M160 0V400M240 0V400M320 0V400M400 0V400M480 0V400M560 0V400M640 0V400M720 0V400" stroke="#d8dde5" stroke-width="1"/><text x="20" y="28" font-family="Arial" font-size="18" font-weight="700">${layout.name}</text>${items}</svg>`;
+}
+
+async function downloadServerReport() {
+  const report = await api("/reports/full");
+  downloadFile("comprehensive-event-report.json", JSON.stringify(report, null, 2), "application/json");
+}
+
+function CalendarView({ events, bookings }) {
+  const dates = [...events.map(event => event.date), ...bookings.map(booking => booking.date)].sort();
+  const firstDate = dates[0] || "2026-06-01";
+  const [year, month] = firstDate.split("-").map(Number);
+  const days = new Date(year, month, 0).getDate();
+  const firstDay = new Date(year, month - 1, 1).getDay();
+  const cells = Array.from({ length: firstDay + days }, (_, index) => index < firstDay ? null : index - firstDay + 1);
+  return h("div", { className: "calendar" },
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => h("strong", { key: day }, day)),
+    cells.map((day, index) => {
+      const date = day ? `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` : "";
+      const dayEvents = events.filter(event => event.date === date);
+      const dayBookings = bookings.filter(booking => booking.date === date);
+      return h("div", { key: index, className: "calendar-cell" },
+        day ? h("span", null, day) : null,
+        dayEvents.map(event => h("small", { key: event.id }, event.name)),
+        dayBookings.map(booking => h("small", { key: booking.id }, booking.eventName))
+      );
+    })
+  );
+}
+
 function csv(rows) {
   if (!rows.length) return "";
   const headers = Object.keys(rows[0]);
@@ -134,16 +185,13 @@ function Login({ data, setUser, refresh, setNotice }) {
   async function login(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const email = String(form.get("email")).trim().toLowerCase();
-    const role = form.get("role");
-    const found = data.users.find(user => user.email.toLowerCase() === email && user.role === role && user.status !== "Inactive");
-    if (!found) {
-      setNotice("No active account matches that email and role.");
-      return;
-    }
-    setUser(found);
-    window.location.hash = makeHash(found.role, rolePages[found.role][0][0]);
-    setNotice(`Logged in as ${found.name}.`);
+    const result = await api("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: form.get("email"), role: form.get("role"), password: form.get("password") })
+    });
+    setUser(result.user);
+    window.location.hash = makeHash(result.user.role, rolePages[result.user.role][0][0]);
+    setNotice(`Logged in as ${result.user.name}.`);
   }
 
   async function register(event) {
@@ -157,7 +205,8 @@ function Login({ data, setUser, refresh, setNotice }) {
       speciality: form.get("speciality") || "",
       company: form.get("company") || ""
     };
-    const created = await api("/users", { method: "POST", body: JSON.stringify(payload) });
+    payload.password = form.get("password");
+    const created = await api("/auth/register", { method: "POST", body: JSON.stringify(payload) });
     await refresh();
     setUser(created);
     window.location.hash = makeHash(created.role, rolePages[created.role][0][0]);
@@ -172,6 +221,7 @@ function Login({ data, setUser, refresh, setNotice }) {
         h("form", { onSubmit: login, className: "panel form-stack" },
           h("h2", null, "Login"),
           h(Field, { label: "Email" }, h("input", { name: "email", type: "email", defaultValue: "mariam@events.example", required: true })),
+          h(Field, { label: "Password" }, h("input", { name: "password", type: "password", defaultValue: "password123", required: true })),
           h(Field, { label: "Role" }, h("select", { name: "role", defaultValue: "Organizer" },
             Object.keys(rolePages).map(role => h("option", { key: role, value: role }, role))
           )),
@@ -181,6 +231,7 @@ function Login({ data, setUser, refresh, setNotice }) {
           h("h2", null, "Register"),
           h(Field, { label: "Name" }, h("input", { name: "name", required: true })),
           h(Field, { label: "Email" }, h("input", { name: "email", type: "email", required: true })),
+          h(Field, { label: "Password" }, h("input", { name: "password", type: "password", required: true })),
           h(Field, { label: "Role" }, h("select", { name: "role", defaultValue: "Vendor" },
             Object.keys(rolePages).map(role => h("option", { key: role, value: role }, role))
           )),
@@ -303,6 +354,7 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
         role: form.get("role"),
         speciality: form.get("speciality") || "",
         company: form.get("company") || "",
+        password: form.get("password") || "password123",
         status: "Active"
       })
     });
@@ -455,6 +507,7 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
         h("form", { onSubmit: createStakeholder, className: "form-stack" },
           h(Field, { label: "Name" }, h("input", { name: "name", required: true })),
           h(Field, { label: "Email" }, h("input", { name: "email", type: "email", required: true })),
+          h(Field, { label: "Temporary password" }, h("input", { name: "password", type: "password", defaultValue: "password123", required: true })),
           h(Field, { label: "Role" }, h("select", { name: "role" },
             ["Staff", "Guest", "Vendor", "Venue Owner"].map(role => h("option", { key: role, value: role }, role))
           )),
@@ -561,8 +614,9 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
         h("div", { className: "section-title" },
           h("h2", null, "Digital Floor Plan"),
           h("div", { className: "actions" },
-            h("button", { onClick: addLayoutElement }, "Add element"),
-            h("button", { onClick: () => downloadFile("floor-plan.json", JSON.stringify(layout, null, 2), "application/json") }, "Export layout")
+          h("button", { onClick: addLayoutElement }, "Add element"),
+            h("button", { onClick: () => downloadFile("floor-plan.json", JSON.stringify(layout, null, 2), "application/json") }, "Export JSON"),
+            h("button", { onClick: () => downloadFile("floor-plan.svg", floorPlanSvg(layout), "image/svg+xml") }, "Export image")
           )
         ),
         h("div", { className: "floorplan editable", onDragOver: event => event.preventDefault(), onDrop: moveLayoutElement },
@@ -654,6 +708,16 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
             key: "invite",
             onClick: async () => {
               await api(`/guests/${guest.id}`, { method: "PATCH", body: JSON.stringify({ invitationSent: true }) });
+              await api("/outbox", {
+                method: "POST",
+                body: JSON.stringify({
+                  type: "invitation",
+                  recipientGroup: guest.email,
+                  subject: "Event invitation",
+                  body: `Invitation sent to ${guest.name}`,
+                  status: "Queued"
+                })
+              });
               setNotice("Digital invitation marked as sent.");
               refresh();
             }
@@ -672,6 +736,12 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
           h(Metric, { label: "Arrived guests", value: data.summary.operations.arrivedGuests }),
           h(Metric, { label: "Messages sent", value: data.messages.length })
         ),
+        h("h3", null, "Communication Outbox"),
+        h("div", { className: "list" }, data.outbox.map(item => h(Card, {
+          key: item.id,
+          title: item.subject,
+          meta: [item.type, item.status, item.recipientGroup]
+        }, h("p", null, item.body)))),
         h("form", { onSubmit: sendMessage, className: "form-stack" },
           h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
           h(Field, { label: "Message" }, h("textarea", { name: "body", required: true, placeholder: "Directions, schedule changes, or welcome messages" })),
@@ -696,6 +766,7 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
       h("div", { className: "actions" },
         h("button", { onClick: () => downloadFile("event-costs.csv", csv([...data.budgets, ...data.expenses]), "text/csv") }, "Export costs CSV"),
         h("button", { onClick: () => downloadFile("attendance.csv", csv(data.guests), "text/csv") }, "Export attendance CSV"),
+        h("button", { onClick: downloadServerReport }, "Export full report"),
         h("button", { onClick: () => window.print() }, "Print report")
       )
     ),
@@ -766,6 +837,10 @@ function StaffPage({ page, data, refresh, setNotice }) {
           ] : []
         })))
       )
+    ),
+    h("section", { className: "panel section-gap" },
+      h("h2", null, "Event Calendar"),
+      h(CalendarView, { events: data.events, bookings: data.bookings })
     );
   }
 
@@ -982,9 +1057,12 @@ function GuestPage({ page, data, refresh, setNotice }) {
         meta: [guestEvent.date, guestEvent.time, guestEvent.dressCode]
       }, h("p", null, guestEvent.agenda))
     ),
-    h("section", { className: "panel" },
-      h("h2", null, "Check-In Code"),
-      h("div", { className: "qr-card" }, `QR-${guest.id.toUpperCase()}-${guest.eventId.toUpperCase()}`),
+      h("section", { className: "panel" },
+        h("h2", null, "Check-In Code"),
+      h("div", { className: "qr-card" },
+        h("img", { src: qrUrl(`guest=${guest.id};event=${guest.eventId}`), alt: "Guest check-in QR code" }),
+        h("strong", null, `QR-${guest.id.toUpperCase()}-${guest.eventId.toUpperCase()}`)
+      ),
       h("p", { className: "muted" }, "Present this code or your name to staff at the event entrance.")
     )
   );
@@ -1019,6 +1097,18 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
     });
     event.currentTarget.reset();
     setNotice("Venue listing created.");
+    refresh();
+  }
+
+  async function uploadVenueFile(venue, event, field) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    const payload = field === "photos"
+      ? { photos: [...(venue.photos || []), dataUrl] }
+      : { floorPlanFile: dataUrl, floorPlanFileName: file.name };
+    await api(`/venues/${venue.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    setNotice(field === "photos" ? "Venue photo uploaded." : "Venue floor plan uploaded.");
     refresh();
   }
 
@@ -1064,7 +1154,15 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
             }, "Set availability"),
             h("button", { key: "remove", className: "warn", onClick: () => patch("venues", venue.id, { active: false, removed: true }, "Venue listing removed from active listings.") }, "Remove")
           ]
-        }, h("p", null, `${venue.dimensions}. ${venue.amenities.join(", ")}`))))
+        },
+          venue.photos?.[0] ? h("img", { className: "uploaded-photo", src: venue.photos[0], alt: venue.name }) : null,
+          h("p", null, `${venue.dimensions}. ${venue.amenities.join(", ")}`),
+          h("div", { className: "upload-row" },
+            h(Field, { label: "Upload photo" }, h("input", { type: "file", accept: "image/*", onChange: event => uploadVenueFile(venue, event, "photos") })),
+            h(Field, { label: "Upload floor plan" }, h("input", { type: "file", accept: "image/*,.pdf", onChange: event => uploadVenueFile(venue, event, "floorPlanFile") }))
+          ),
+          venue.floorPlanFile ? h("a", { href: venue.floorPlanFile, download: venue.floorPlanFileName || "floor-plan" }, "Download uploaded floor plan") : null
+        )))
       )
     );
   }
@@ -1086,6 +1184,7 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
         h("h2", null, "Performance And Reporting"),
         h("div", { className: "actions" },
           h("button", { onClick: () => downloadFile("venue-bookings.csv", csv(data.bookings), "text/csv") }, "Export bookings CSV"),
+          h("button", { onClick: downloadServerReport }, "Export full report"),
           h("button", { onClick: () => window.print() }, "Print report")
         )
       ),
@@ -1094,6 +1193,10 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
         h(Metric, { label: "Pending requests", value: data.summary.venueOwner.pendingBookings }),
         h(Metric, { label: "Revenue", value: `${data.summary.venueOwner.revenue.toLocaleString()} EGP` })
       )
+    ),
+    h("section", { className: "panel section-gap" },
+      h("h2", null, "Confirmed Bookings Calendar"),
+      h(CalendarView, { events: [], bookings: data.bookings.filter(booking => booking.status === "Approved") })
     );
   }
 

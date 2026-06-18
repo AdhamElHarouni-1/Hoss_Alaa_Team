@@ -4,7 +4,7 @@ This document maps the provided user journeys to the implemented website screens
 
 ## Event Organizer
 
-- Account creation/customization: login/register screen and Organizer > Accounts page.
+- Account creation/customization: backend password login/register screen and Organizer > Accounts page.
 - Create stakeholder accounts: Organizer > Accounts.
 - Deactivate stakeholder accounts: Organizer > Accounts.
 - Venue search/filter by location, size, date: Organizer > Venue Search.
@@ -18,7 +18,7 @@ This document maps the provided user journeys to the implemented website screens
 - Budget difference: Organizer > Dashboard and Reports.
 - Digital floor plan: Organizer > Planning.
 - Drag-and-drop layout editing: Organizer > Planning.
-- Layout export: Organizer > Planning.
+- Layout export: Organizer > Planning exports JSON and SVG image files.
 - Staff filtering/details: Organizer > Planning.
 - Vendor directory/search: Organizer > Vendors.
 - Sourcing requests: Organizer > Vendors.
@@ -27,8 +27,8 @@ This document maps the provided user journeys to the implemented website screens
 - Guest list/search/filter: Organizer > Guests.
 - Send invitations: Organizer > Guests.
 - RSVP/dietary status: Organizer > Guests.
-- Day-of dashboard/messages/follow-up: Organizer > Day-Of.
-- Feedback and report export: Organizer > Reports.
+- Day-of dashboard/messages/follow-up: Organizer > Day-Of, with communication outbox records.
+- Feedback and report export: Organizer > Reports, with CSV and full JSON report export.
 
 ## Staff
 
@@ -54,22 +54,22 @@ This document maps the provided user journeys to the implemented website screens
 - Invitation details: Guest > Invitation.
 - RSVP and dietary requirements: Guest > RSVP.
 - Day-of messages and seen status: Guest > Messages.
-- Check-in code: Guest > Invitation.
+- Scannable QR check-in image: Guest > Invitation.
 - Post-event feedback: Guest > Feedback.
 
 ## Venue Owners
 
 - Register/login/profile: login/register screen and Venue Owner > Profile.
 - Create venue listings: Venue Owner > Listings.
-- Manage listing details/status/availability/removal: Venue Owner > Listings.
+- Manage listing details/status/availability/removal/photo upload/floor-plan upload: Venue Owner > Listings.
 - Booking request approve/decline/counter proposal: Venue Owner > Requests.
 - Confirmed booking overview: Venue Owner > Bookings.
-- Booking filters: Venue Owner > Requests.
+- Booking filters and calendar view: Venue Owner > Requests and Bookings.
 - Performance/revenue reports and export: Venue Owner > Reports.
 
-## Simplified Items
+## External-Service Notes
 
-- Email, messaging, and notifications are simulated in the local database.
-- QR scanning is represented by a generated check-in code.
-- Photo uploads are represented by venue image placeholders.
-- PDF export is represented by browser print and CSV/JSON export buttons.
+- Email and messaging are stored as real queued outbox records in the backend. Connecting those queued records to actual external email/SMS delivery requires SMTP/SMS provider credentials.
+- QR codes are rendered as actual QR images through a QR-code image endpoint.
+- Venue photos and floor-plan files are uploaded into the local database as data URLs.
+- Reports export as CSV/JSON files and print through the browser print dialog.

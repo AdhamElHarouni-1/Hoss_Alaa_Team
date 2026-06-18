@@ -1,15 +1,20 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const dbPath = path.join(__dirname, "..", "data", "db.json");
 
+function hashPassword(password) {
+  return crypto.createHash("sha256").update(String(password)).digest("hex");
+}
+
 const db = {
   users: [
-    { id: "user-1", name: "Mariam Hassan", role: "Organizer", email: "mariam@events.example", status: "Active" },
-    { id: "user-2", name: "Omar Adel", role: "Staff", email: "omar@events.example", status: "Active", speciality: "Logistics" },
-    { id: "user-3", name: "Nour Samy", role: "Vendor", email: "nour@cairoflorals.example", status: "Active" },
-    { id: "user-4", name: "Laila Fouad", role: "Guest", email: "laila@example.com", status: "Active" },
-    { id: "user-5", name: "Karim Youssef", role: "Venue Owner", email: "karim@venues.example", status: "Active" }
+    { id: "user-1", name: "Mariam Hassan", role: "Organizer", email: "mariam@events.example", status: "Active", passwordHash: hashPassword("password123") },
+    { id: "user-2", name: "Omar Adel", role: "Staff", email: "omar@events.example", status: "Active", speciality: "Logistics", passwordHash: hashPassword("password123") },
+    { id: "user-3", name: "Nour Samy", role: "Vendor", email: "nour@cairoflorals.example", status: "Active", passwordHash: hashPassword("password123") },
+    { id: "user-4", name: "Laila Fouad", role: "Guest", email: "laila@example.com", status: "Active", passwordHash: hashPassword("password123") },
+    { id: "user-5", name: "Karim Youssef", role: "Venue Owner", email: "karim@venues.example", status: "Active", passwordHash: hashPassword("password123") }
   ],
   venues: [
     {
@@ -21,6 +26,8 @@ const db = {
       amenities: ["Stage", "AV", "Parking", "Catering kitchen"],
       pricePerDay: 90000,
       unavailableDates: ["2026-06-20"],
+      photos: ["https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=900&q=80"],
+      floorPlanFile: "",
       active: true,
       ownerId: "user-5"
     },
@@ -33,6 +40,8 @@ const db = {
       amenities: ["Outdoor area", "Lighting", "Security"],
       pricePerDay: 42000,
       unavailableDates: ["2026-06-18"],
+      photos: ["https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&w=900&q=80"],
+      floorPlanFile: "",
       active: true,
       ownerId: "user-5"
     },
@@ -45,6 +54,8 @@ const db = {
       amenities: ["Sea view", "AV", "Loading bay"],
       pricePerDay: 65000,
       unavailableDates: [],
+      photos: ["https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=900&q=80"],
+      floorPlanFile: "",
       active: true,
       ownerId: "user-5"
     }
@@ -179,7 +190,12 @@ const db = {
   notifications: [
     { id: "notification-1", userId: "user-1", text: "Catering task is due tomorrow.", read: false },
     { id: "notification-2", userId: "vendor-1", text: "Invoice invoice-1 is pending organizer review.", read: false }
-  ]
+  ],
+  sessions: [],
+  outbox: [
+    { id: "outbox-1", type: "invitation", recipientGroup: "Guests", subject: "Tech Founders Summit invitation", body: "Please RSVP for Tech Founders Summit.", status: "Queued", createdAt: "2026-06-15T10:00:00.000Z" }
+  ],
+  reports: []
 };
 
 fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
