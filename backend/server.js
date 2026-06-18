@@ -360,4 +360,3 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`Event Management Platform running at http://localhost:${PORT}`);
 });
-//ali siu 
