@@ -1,0 +1,19 @@
+{
+  "name": "event-management-platform",
+  "version": "1.0.0",
+  "description": "Milestone 2 full-stack event management platform for organizer, staff, vendor, guest, and venue owner journeys.",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "seed": "node scripts/seed.js",
+    "dev": "node backend/server.js"
+  },
+  "keywords": [
+    "react",
+    "node",
+    "event-management",
+    "software-engineering"
+  ],
+  "author": "Software Engineering Team",
+  "license": "MIT"
+}
