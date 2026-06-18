@@ -32,3 +32,11 @@ The assistant then scaffolded:
 ## How The AI Output Was Reviewed
 
 The generated code should be reviewed by the team before submission. Team members should run the project locally, test the user journeys, update names/contributions in the README, and make meaningful commits using their own GitHub accounts.
+
+## Follow-Up Prompt
+
+The user asked whether the implementation followed the provided user journeys and requested that the website be made closer to the PDF by adding login/register, separate pages, venue listing pages, drag-and-drop floor plan behavior, and report/export buttons.
+
+## Follow-Up AI Assistance Summary
+
+The assistant updated the frontend so the application now opens with login/register, then shows page-based navigation for each role instead of only role tabs. The organizer journey now has separate pages for dashboard, venue search, planning, vendor coordination, guest management, day-of operations, and reports. Staff, vendor, guest, and venue owner journeys were also split into dedicated pages. The update added client-side CSV/JSON exports, print report buttons, venue listing cards, a draggable floor plan editor, and clearer role-specific workflows.

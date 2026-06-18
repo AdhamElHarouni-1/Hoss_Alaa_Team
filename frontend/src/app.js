@@ -1,10 +1,66 @@
 const h = React.createElement;
 const API = "/api";
 
+const resources = [
+  "users",
+  "venues",
+  "bookings",
+  "events",
+  "tasks",
+  "budgets",
+  "expenses",
+  "vendors",
+  "sourcingRequests",
+  "deliveries",
+  "invoices",
+  "guests",
+  "messages",
+  "feedback",
+  "layouts",
+  "notifications"
+];
+
+const rolePages = {
+  Organizer: [
+    ["dashboard", "Dashboard"],
+    ["venues", "Venue Search"],
+    ["planning", "Planning"],
+    ["vendors", "Vendors"],
+    ["guests", "Guests"],
+    ["operations", "Day-Of"],
+    ["reports", "Reports"]
+  ],
+  Staff: [
+    ["tasks", "Tasks"],
+    ["layout", "Floor Plan"],
+    ["checkin", "Check-In"],
+    ["operations", "Operations"]
+  ],
+  Vendor: [
+    ["profile", "Profile"],
+    ["requests", "Requests"],
+    ["deliveries", "Deliveries"],
+    ["invoices", "Invoices"]
+  ],
+  Guest: [
+    ["invitation", "Invitation"],
+    ["rsvp", "RSVP"],
+    ["messages", "Messages"],
+    ["feedback", "Feedback"]
+  ],
+  "Venue Owner": [
+    ["profile", "Profile"],
+    ["listings", "Listings"],
+    ["requests", "Requests"],
+    ["bookings", "Bookings"],
+    ["reports", "Reports"]
+  ]
+};
+
 function statusClass(status) {
-  if (["Approved", "Accepted", "Arrived", "Done", "Delivered", "Paid", "Attending"].includes(status)) return "green";
-  if (["Pending", "Maybe", "Preparing", "Pending Review", "In Progress"].includes(status)) return "amber";
-  if (["Declined", "Not Attending", "Not Arrived"].includes(status)) return "rose";
+  if (["Approved", "Accepted", "Arrived", "Done", "Delivered", "Paid", "Attending", "Active"].includes(status)) return "green";
+  if (["Pending", "Maybe", "Preparing", "Pending Review", "In Progress", "Out for Delivery"].includes(status)) return "amber";
+  if (["Declined", "Not Attending", "Not Arrived", "Inactive"].includes(status)) return "rose";
   return "";
 }
 
@@ -16,6 +72,36 @@ async function api(resource, options) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Request failed");
   return data;
+}
+
+function makeHash(role, page) {
+  return `#/${role.toLowerCase().replaceAll(" ", "-")}/${page}`;
+}
+
+function parseHash() {
+  const parts = window.location.hash.replace("#/", "").split("/");
+  const role = Object.keys(rolePages).find(item => item.toLowerCase().replaceAll(" ", "-") === parts[0]) || "Organizer";
+  const page = rolePages[role].some(([key]) => key === parts[1]) ? parts[1] : rolePages[role][0][0];
+  return { role, page };
+}
+
+function downloadFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csv(rows) {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]);
+  const escape = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  return [headers.join(","), ...rows.map(row => headers.map(header => escape(row[header])).join(","))].join("\n");
 }
 
 function Field({ label, children }) {
@@ -43,16 +129,108 @@ function Metric({ label, value, detail }) {
   );
 }
 
-function Organizer({ data, refresh, setNotice }) {
+function Login({ data, setUser, refresh, setNotice }) {
+  async function login(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email")).trim().toLowerCase();
+    const role = form.get("role");
+    const found = data.users.find(user => user.email.toLowerCase() === email && user.role === role && user.status !== "Inactive");
+    if (!found) {
+      setNotice("No active account matches that email and role.");
+      return;
+    }
+    setUser(found);
+    window.location.hash = makeHash(found.role, rolePages[found.role][0][0]);
+    setNotice(`Logged in as ${found.name}.`);
+  }
+
+  async function register(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      name: form.get("name"),
+      email: form.get("email"),
+      role: form.get("role"),
+      status: "Active",
+      speciality: form.get("speciality") || "",
+      company: form.get("company") || ""
+    };
+    const created = await api("/users", { method: "POST", body: JSON.stringify(payload) });
+    await refresh();
+    setUser(created);
+    window.location.hash = makeHash(created.role, rolePages[created.role][0][0]);
+    setNotice(`Registered and logged in as ${created.name}.`);
+  }
+
+  return h("main", { className: "auth-shell" },
+    h("section", { className: "auth-panel" },
+      h("h1", null, "Event Management Platform"),
+      h("p", { className: "muted" }, "Sign in as one of the journey actors, or register a new account for a stakeholder."),
+      h("div", { className: "wide-grid" },
+        h("form", { onSubmit: login, className: "panel form-stack" },
+          h("h2", null, "Login"),
+          h(Field, { label: "Email" }, h("input", { name: "email", type: "email", defaultValue: "mariam@events.example", required: true })),
+          h(Field, { label: "Role" }, h("select", { name: "role", defaultValue: "Organizer" },
+            Object.keys(rolePages).map(role => h("option", { key: role, value: role }, role))
+          )),
+          h("button", { className: "primary" }, "Login")
+        ),
+        h("form", { onSubmit: register, className: "panel form-stack" },
+          h("h2", null, "Register"),
+          h(Field, { label: "Name" }, h("input", { name: "name", required: true })),
+          h(Field, { label: "Email" }, h("input", { name: "email", type: "email", required: true })),
+          h(Field, { label: "Role" }, h("select", { name: "role", defaultValue: "Vendor" },
+            Object.keys(rolePages).map(role => h("option", { key: role, value: role }, role))
+          )),
+          h(Field, { label: "Speciality" }, h("input", { name: "speciality", placeholder: "Catering, logistics, seating" })),
+          h(Field, { label: "Company" }, h("input", { name: "company", placeholder: "For vendors or venue owners" })),
+          h("button", { className: "primary" }, "Create account")
+        )
+      ),
+      h("div", { className: "demo-accounts" },
+        h("strong", null, "Demo accounts: "),
+        data.users.map(user => h("span", { key: user.id }, `${user.role}: ${user.email}`))
+      )
+    )
+  );
+}
+
+function AppFrame({ user, route, setRoute, setUser, notice, children }) {
+  return h(React.Fragment, null,
+    h("header", { className: "app-header" },
+      h("div", null,
+        h("h1", null, "Event Management Platform"),
+        h("p", null, `${user.role} workspace for ${user.name}`)
+      ),
+      h("button", { onClick: () => setUser(null) }, "Logout")
+    ),
+    h("nav", { className: "role-tabs", "aria-label": "Journey pages" },
+      rolePages[user.role].map(([page, label]) => h("a", {
+        key: page,
+        href: makeHash(user.role, page),
+        className: route.page === page ? "active" : "",
+        onClick: () => setRoute({ role: user.role, page })
+      }, label))
+    ),
+    h("main", { className: "workspace" },
+      notice ? h("div", { className: "status-line" }, notice) : null,
+      children
+    )
+  );
+}
+
+function OrganizerPage({ page, data, refresh, setNotice }) {
   const [venueQuery, setVenueQuery] = React.useState({ location: "Cairo", minCapacity: 200, date: "2026-06-18" });
   const [taskStatus, setTaskStatus] = React.useState("");
+  const [draggedElement, setDraggedElement] = React.useState(null);
+  const layout = data.layouts[0];
   const venues = data.venues.filter(venue =>
-    (!venueQuery.location || venue.location === venueQuery.location) &&
+    (!venueQuery.location || venue.location.toLowerCase().includes(venueQuery.location.toLowerCase())) &&
     Number(venue.capacity) >= Number(venueQuery.minCapacity || 0) &&
     !(venue.unavailableDates || []).includes(venueQuery.date)
   );
   const tasks = data.tasks.filter(task => !taskStatus || task.status === taskStatus);
-  const layout = data.layouts[0];
 
   async function createBooking(event) {
     event.preventDefault();
@@ -94,152 +272,319 @@ function Organizer({ data, refresh, setNotice }) {
     refresh();
   }
 
-  return h("div", { className: "wide-grid" },
-    h("div", { className: "panel" },
-      h("div", { className: "section-title" }, h("h2", null, "Organizer Control")),
+  async function moveLayoutElement(event) {
+    event.preventDefault();
+    if (!draggedElement) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.round(((event.clientX - rect.left) / rect.width) * 100);
+    const y = Math.round(((event.clientY - rect.top) / rect.height) * 100);
+    const elements = layout.elements.map((item, index) => index === draggedElement ? { ...item, x, y } : item);
+    await api(`/layouts/${layout.id}`, { method: "PATCH", body: JSON.stringify({ elements }) });
+    setNotice("Floor plan updated.");
+    setDraggedElement(null);
+    refresh();
+  }
+
+  function addLayoutElement() {
+    const label = window.prompt("Element label", "New table");
+    if (!label) return;
+    const elements = [...layout.elements, { type: "table", x: 50, y: 50, label }];
+    api(`/layouts/${layout.id}`, { method: "PATCH", body: JSON.stringify({ elements }) })
+      .then(() => {
+        setNotice("Floor plan element added.");
+        refresh();
+      });
+  }
+
+  if (page === "dashboard") {
+    return h("section", null,
       h("div", { className: "grid" },
         h(Metric, { label: "Today's events", value: data.summary.todaysEvents.length, detail: "Daily dashboard" }),
         h(Metric, { label: "Arrived guests", value: `${data.summary.operations.arrivedGuests}/${data.summary.operations.totalGuests}`, detail: "Day-of operations" }),
         h(Metric, { label: "Budget difference", value: `${data.summary.budget.difference.toLocaleString()} EGP`, detail: "Planned minus actual" }),
         h(Metric, { label: "Feedback", value: `${data.summary.feedback.positive}+ / ${data.summary.feedback.negative}-`, detail: "Post-event analysis" })
       ),
-      h("h3", null, "Search Venues"),
-      h("div", { className: "toolbar" },
-        h("input", { value: venueQuery.location, onChange: e => setVenueQuery({ ...venueQuery, location: e.target.value }), placeholder: "Location" }),
-        h("input", { type: "number", value: venueQuery.minCapacity, onChange: e => setVenueQuery({ ...venueQuery, minCapacity: e.target.value }), placeholder: "Minimum capacity" }),
-        h("input", { type: "date", value: venueQuery.date, onChange: e => setVenueQuery({ ...venueQuery, date: e.target.value }) })
-      ),
-      h("div", { className: "list" }, venues.map(venue => h(Card, {
-        key: venue.id,
-        title: venue.name,
-        meta: [venue.location, `${venue.capacity} guests`, `${venue.pricePerDay.toLocaleString()} EGP/day`]
-      }, h("p", null, venue.amenities.join(", "))))),
-      h("h3", null, "Submit Venue Application"),
-      h("form", { onSubmit: createBooking, className: "form-grid" },
-        h(Field, { label: "Venue" }, h("select", { name: "venueId", required: true }, data.venues.map(venue => h("option", { key: venue.id, value: venue.id }, venue.name)))),
-        h(Field, { label: "Event name" }, h("input", { name: "eventName", required: true })),
-        h(Field, { label: "Type" }, h("input", { name: "eventType", required: true })),
-        h(Field, { label: "Date" }, h("input", { name: "date", type: "date", required: true })),
-        h(Field, { label: "Attendees" }, h("input", { name: "attendees", type: "number", required: true })),
-        h(Field, { label: "Expected price" }, h("input", { name: "price", type: "number", required: true })),
-        h(Field, { label: "Requirements" }, h("input", { name: "requirements", required: true })),
-        h("button", { className: "primary" }, "Submit")
+      h("div", { className: "wide-grid section-gap" },
+        h("div", { className: "panel" },
+          h("h2", null, "Upcoming Events"),
+          h("div", { className: "list" }, data.summary.upcomingEvents.map(event => h(Card, {
+            key: event.id,
+            title: event.name,
+            meta: [event.date, event.time, event.dressCode]
+          }, h("p", null, event.agenda))))
+        ),
+        h("div", { className: "panel" },
+          h("h2", null, "Task Reminders"),
+          h("div", { className: "list" }, data.summary.taskReminders.map(task => h(Card, {
+            key: task.id,
+            title: task.title,
+            meta: [task.status, task.dueDate, task.speciality]
+          })))
+        )
       )
-    ),
-    h("div", { className: "panel" },
-      h("div", { className: "section-title" }, h("h2", null, "Planning Workspace")),
-      h("div", { className: "toolbar" },
-        h("select", { value: taskStatus, onChange: e => setTaskStatus(e.target.value) },
-          h("option", { value: "" }, "All task statuses"),
-          ["Pending", "In Progress", "Done"].map(status => h("option", { key: status, value: status }, status))
+    );
+  }
+
+  if (page === "venues") {
+    return h("div", { className: "wide-grid" },
+      h("section", { className: "panel" },
+        h("h2", null, "Discover And Shortlist Venues"),
+        h("div", { className: "toolbar" },
+          h("input", { value: venueQuery.location, onChange: e => setVenueQuery({ ...venueQuery, location: e.target.value }), placeholder: "Location" }),
+          h("input", { type: "number", value: venueQuery.minCapacity, onChange: e => setVenueQuery({ ...venueQuery, minCapacity: e.target.value }), placeholder: "Minimum capacity" }),
+          h("input", { type: "date", value: venueQuery.date, onChange: e => setVenueQuery({ ...venueQuery, date: e.target.value }) })
+        ),
+        h("div", { className: "venue-grid" }, venues.map(venue => h(Card, {
+          key: venue.id,
+          title: venue.name,
+          meta: [venue.location, `${venue.capacity} guests`, `${venue.pricePerDay.toLocaleString()} EGP/day`]
+        },
+          h("div", { className: "venue-photo" }, venue.name.split(" ").map(word => word[0]).join("")),
+          h("p", null, `${venue.dimensions}. ${venue.amenities.join(", ")}`)
+        )))
+      ),
+      h("section", { className: "panel" },
+        h("h2", null, "Submit Venue Application"),
+        h("form", { onSubmit: createBooking, className: "form-stack" },
+          h(Field, { label: "Venue" }, h("select", { name: "venueId", required: true }, data.venues.map(venue => h("option", { key: venue.id, value: venue.id }, venue.name)))),
+          h(Field, { label: "Event name" }, h("input", { name: "eventName", required: true })),
+          h(Field, { label: "Type" }, h("input", { name: "eventType", required: true })),
+          h(Field, { label: "Date" }, h("input", { name: "date", type: "date", required: true })),
+          h(Field, { label: "Expected attendees" }, h("input", { name: "attendees", type: "number", required: true })),
+          h(Field, { label: "Expected price" }, h("input", { name: "price", type: "number", required: true })),
+          h(Field, { label: "Special requirements" }, h("textarea", { name: "requirements", required: true })),
+          h("button", { className: "primary" }, "Submit request")
+        ),
+        h("h3", null, "Booking Status"),
+        h("div", { className: "list" }, data.bookings.map(booking => h(Card, {
+          key: booking.id,
+          title: booking.eventName,
+          meta: [booking.status, booking.date, `${booking.attendees} attendees`]
+        })))
+      )
+    );
+  }
+
+  if (page === "planning") {
+    return h("div", { className: "wide-grid" },
+      h("section", { className: "panel" },
+        h("h2", null, "Tasks And Team Members"),
+        h("div", { className: "toolbar" },
+          h("select", { value: taskStatus, onChange: e => setTaskStatus(e.target.value) },
+            h("option", { value: "" }, "All task statuses"),
+            ["Pending", "In Progress", "Done"].map(status => h("option", { key: status, value: status }, status))
+          )
+        ),
+        h("div", { className: "list" }, tasks.map(task => h(Card, {
+          key: task.id,
+          title: task.title,
+          meta: [task.status, task.speciality, task.dueDate],
+          actions: [h("button", { key: "assign", onClick: () => assignTask(task.id, "user-2") }, "Assign to Omar")]
+        }, h("p", null, `Assigned to: ${data.users.find(user => user.id === task.assignedTo)?.name || "Not yet assigned"}`))))
+      ),
+      h("section", { className: "panel" },
+        h("div", { className: "section-title" },
+          h("h2", null, "Digital Floor Plan"),
+          h("div", { className: "actions" },
+            h("button", { onClick: addLayoutElement }, "Add element"),
+            h("button", { onClick: () => downloadFile("floor-plan.json", JSON.stringify(layout, null, 2), "application/json") }, "Export layout")
+          )
+        ),
+        h("div", { className: "floorplan editable", onDragOver: event => event.preventDefault(), onDrop: moveLayoutElement },
+          layout.elements.map((item, index) => h("div", {
+            key: index,
+            draggable: true,
+            onDragStart: () => setDraggedElement(index),
+            className: "floor-item",
+            style: { left: `${item.x}%`, top: `${item.y}%` }
+          }, item.label))
+        ),
+        h("h3", null, "Budget And Expenses"),
+        h("div", { className: "grid" },
+          ...data.budgets.map(item => h(Card, { key: item.id, title: item.category, meta: [`${item.planned.toLocaleString()} EGP planned`] })),
+          ...data.expenses.map(item => h(Card, { key: item.id, title: item.description, meta: [item.category, `${item.amount.toLocaleString()} EGP actual`] }))
+        )
+      )
+    );
+  }
+
+  if (page === "vendors") {
+    return h("div", { className: "wide-grid" },
+      h("section", { className: "panel" },
+        h("h2", null, "Vendor Directory"),
+        h("div", { className: "list" }, data.vendors.map(vendor => h(Card, {
+          key: vendor.id,
+          title: vendor.name,
+          meta: [vendor.location, vendor.status]
+        }, h("p", null, `${vendor.supplies}. ${vendor.pricing}`))))
+      ),
+      h("section", { className: "panel" },
+        h("h2", null, "Sourcing And Invoices"),
+        h("div", { className: "list" }, data.sourcingRequests.map(request => h(Card, {
+          key: request.id,
+          title: request.items,
+          meta: [request.status, request.deliveryDate, request.location]
+        }, h("p", null, request.note)))),
+        h("div", { className: "list section-gap" }, data.invoices.map(invoice => h(Card, {
+          key: invoice.id,
+          title: `${Number(invoice.amount).toLocaleString()} EGP invoice`,
+          meta: [invoice.status, invoice.breakdown]
+        })))
+      )
+    );
+  }
+
+  if (page === "guests") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Guest Management"),
+      h("div", { className: "list" }, data.guests.map(guest => h(Card, {
+        key: guest.id,
+        title: guest.name,
+        meta: [guest.rsvp, guest.checkInStatus, guest.dietary, guest.invitationSent ? "Invited" : "Not invited"],
+        actions: !guest.invitationSent ? [
+          h("button", {
+            key: "invite",
+            onClick: async () => {
+              await api(`/guests/${guest.id}`, { method: "PATCH", body: JSON.stringify({ invitationSent: true }) });
+              setNotice("Digital invitation marked as sent.");
+              refresh();
+            }
+          }, "Send invitation")
+        ] : []
+      }, h("p", null, guest.email))))
+    );
+  }
+
+  if (page === "operations") {
+    return h("div", { className: "wide-grid" },
+      h("section", { className: "panel" },
+        h("h2", null, "Live Operations Dashboard"),
+        h("div", { className: "grid" },
+          h(Metric, { label: "Total guests", value: data.summary.operations.totalGuests }),
+          h(Metric, { label: "Arrived guests", value: data.summary.operations.arrivedGuests }),
+          h(Metric, { label: "Messages sent", value: data.messages.length })
+        ),
+        h("form", { onSubmit: sendMessage, className: "form-stack" },
+          h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
+          h(Field, { label: "Message" }, h("textarea", { name: "body", required: true, placeholder: "Directions, schedule changes, or welcome messages" })),
+          h("button", { className: "primary" }, "Send live message")
         )
       ),
-      h("div", { className: "list" }, tasks.map(task => h(Card, {
-        key: task.id,
-        title: task.title,
-        meta: [task.status, task.speciality, task.dueDate],
-        actions: [
-          h("button", { key: "assign", onClick: () => assignTask(task.id, "user-2") }, "Assign to Omar")
-        ]
-      }, h("p", null, `Assigned to: ${task.assignedTo || "Not yet assigned"}`)))),
-      h("h3", null, "Budget and Expenses"),
-      h("div", { className: "grid" },
-        ...data.budgets.map(item => h(Card, { key: item.id, title: item.category, meta: [`${item.planned.toLocaleString()} EGP planned`] })),
-        ...data.expenses.map(item => h(Card, { key: item.id, title: item.description, meta: [item.category, `${item.amount.toLocaleString()} EGP actual`] }))
-      ),
-      h("h3", null, "Shared Floor Plan"),
-      h("div", { className: "floorplan" }, layout.elements.map((item, index) =>
-        h("div", { key: index, className: "floor-item", style: { left: `${item.x}%`, top: `${item.y}%` } }, item.label)
-      )),
-      h("h3", null, "Send Day-Of Communication"),
-      h("form", { onSubmit: sendMessage, className: "form-grid" },
-        h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
-        h(Field, { label: "Message" }, h("input", { name: "body", required: true, placeholder: "Schedule update or directions" })),
-        h("button", { className: "primary" }, "Send")
+      h("section", { className: "panel" },
+        h("h2", null, "Message Tracking"),
+        h("div", { className: "list" }, data.messages.map(message => h(Card, {
+          key: message.id,
+          title: message.body,
+          meta: [message.status, `${message.seenBy.length} seen`],
+          actions: [h("button", { key: "follow", onClick: () => setNotice("Follow-up message queued for guests who have not seen it.") }, "Send follow-up")]
+        })))
       )
-    )
+    );
+  }
+
+  return h("section", { className: "panel" },
+    h("div", { className: "section-title" },
+      h("h2", null, "Reports And Exports"),
+      h("div", { className: "actions" },
+        h("button", { onClick: () => downloadFile("event-costs.csv", csv([...data.budgets, ...data.expenses]), "text/csv") }, "Export costs CSV"),
+        h("button", { onClick: () => downloadFile("attendance.csv", csv(data.guests), "text/csv") }, "Export attendance CSV"),
+        h("button", { onClick: () => window.print() }, "Print report")
+      )
+    ),
+    h("div", { className: "grid" },
+      h(Metric, { label: "Planned budget", value: `${data.summary.budget.plannedBudget.toLocaleString()} EGP` }),
+      h(Metric, { label: "Actual expenses", value: `${data.summary.budget.actualExpenses.toLocaleString()} EGP` }),
+      h(Metric, { label: "Attendance", value: `${data.summary.operations.arrivedGuests}/${data.summary.operations.totalGuests}` }),
+      h(Metric, { label: "Positive feedback", value: data.summary.feedback.positive })
+    ),
+    h("div", { className: "list section-gap" }, data.feedback.map(item => h(Card, {
+      key: item.id,
+      title: `Guest feedback ${item.rating}/5`,
+      meta: [`Food ${item.food}`, `Venue ${item.venue}`, `Organization ${item.organization}`]
+    }, h("p", null, item.comments))))
   );
 }
 
-function Staff({ data, refresh, setNotice }) {
+function StaffPage({ page, data, refresh, setNotice }) {
   const [status, setStatus] = React.useState("");
   const tasks = data.tasks.filter(task => task.assignedTo === "user-2" && (!status || task.status === status));
 
-  async function updateTask(task, nextStatus) {
-    await api(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: nextStatus }) });
-    setNotice("Task progress updated.");
+  async function patch(resource, id, payload, message) {
+    await api(`/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    setNotice(message);
     refresh();
   }
 
-  async function checkInGuest(guest) {
-    await api(`/guests/${guest.id}`, { method: "PATCH", body: JSON.stringify({ checkInStatus: "Arrived" }) });
-    setNotice(`${guest.name} checked in.`);
-    refresh();
-  }
-
-  async function markDelivery(delivery) {
-    await api(`/deliveries/${delivery.id}`, { method: "PATCH", body: JSON.stringify({ status: "Delivered" }) });
-    setNotice("Vendor arrival marked as delivered.");
-    refresh();
-  }
-
-  return h("div", { className: "wide-grid" },
-    h("div", { className: "panel" },
-      h("h2", null, "Staff Operations"),
-      h("div", { className: "toolbar" },
-        h("select", { value: status, onChange: e => setStatus(e.target.value) },
-          h("option", { value: "" }, "All assigned tasks"),
-          ["Pending", "In Progress", "Done"].map(item => h("option", { key: item, value: item }, item))
-        )
-      ),
-      h("div", { className: "list" }, tasks.map(task => h(Card, {
-        key: task.id,
-        title: task.title,
-        meta: [task.status, task.dueDate, task.speciality],
-        actions: [
-          h("button", { key: "start", onClick: () => updateTask(task, "In Progress") }, "Start"),
-          h("button", { key: "done", className: "success", onClick: () => updateTask(task, "Done") }, "Done")
-        ]
-      }))),
-      h("h3", null, "Shared Layout"),
+  if (page === "layout") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Shared Digital Floor Plan"),
       h("div", { className: "floorplan" }, data.layouts[0].elements.map((item, index) =>
         h("div", { key: index, className: "floor-item", style: { left: `${item.x}%`, top: `${item.y}%` } }, item.label)
       ))
-    ),
-    h("div", { className: "panel" },
-      h("h2", null, "Guest and Vendor Logistics"),
-      h("div", { className: "grid" },
-        h(Metric, { label: "Total guests", value: data.summary.operations.totalGuests }),
-        h(Metric, { label: "Arrived", value: data.summary.operations.arrivedGuests })
-      ),
-      h("h3", null, "Guest Check-In"),
+    );
+  }
+
+  if (page === "checkin") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Guest Check-In"),
       h("div", { className: "list" }, data.guests.map(guest => h(Card, {
         key: guest.id,
         title: guest.name,
         meta: [guest.rsvp, guest.checkInStatus, guest.dietary],
-        actions: guest.checkInStatus !== "Arrived" ? [h("button", { key: "check", className: "primary", onClick: () => checkInGuest(guest) }, "Check in")] : []
-      }))),
-      h("h3", null, "Vendor Arrivals"),
-      h("div", { className: "list" }, data.deliveries.map(delivery => h(Card, {
-        key: delivery.id,
-        title: data.vendors.find(vendor => vendor.id === delivery.vendorId)?.name || delivery.vendorId,
-        meta: [delivery.status],
-        actions: delivery.status !== "Delivered" ? [h("button", { key: "arrived", onClick: () => markDelivery(delivery) }, "Mark arrived")] : []
-      })))
-    )
+        actions: guest.checkInStatus !== "Arrived" ? [
+          h("button", { key: "check", className: "primary", onClick: () => patch("guests", guest.id, { checkInStatus: "Arrived" }, `${guest.name} checked in.`) }, "Check in")
+        ] : []
+      }, h("p", null, `QR-${guest.id.toUpperCase()}-${guest.eventId.toUpperCase()}`))))
+    );
+  }
+
+  if (page === "operations") {
+    return h("div", { className: "wide-grid" },
+      h("section", { className: "panel" },
+        h("h2", null, "Operations Dashboard"),
+        h("div", { className: "grid" },
+          h(Metric, { label: "Total guests", value: data.summary.operations.totalGuests }),
+          h(Metric, { label: "Arrived", value: data.summary.operations.arrivedGuests })
+        )
+      ),
+      h("section", { className: "panel" },
+        h("h2", null, "Vendor Arrival Coordination"),
+        h("div", { className: "list" }, data.deliveries.map(delivery => h(Card, {
+          key: delivery.id,
+          title: data.vendors.find(vendor => vendor.id === delivery.vendorId)?.name || delivery.vendorId,
+          meta: [delivery.status],
+          actions: delivery.status !== "Delivered" ? [
+            h("button", { key: "arrived", onClick: () => patch("deliveries", delivery.id, { status: "Delivered" }, "Vendor arrival marked as delivered.") }, "Mark arrived")
+          ] : []
+        })))
+      )
+    );
+  }
+
+  return h("section", { className: "panel" },
+    h("h2", null, "Assigned Operational Tasks"),
+    h("div", { className: "toolbar" },
+      h("select", { value: status, onChange: e => setStatus(e.target.value) },
+        h("option", { value: "" }, "All assigned tasks"),
+        ["Pending", "In Progress", "Done"].map(item => h("option", { key: item, value: item }, item))
+      )
+    ),
+    h("div", { className: "list" }, tasks.map(task => h(Card, {
+      key: task.id,
+      title: task.title,
+      meta: [task.status, task.dueDate, task.speciality],
+      actions: [
+        h("button", { key: "start", onClick: () => patch("tasks", task.id, { status: "In Progress" }, "Task progress updated.") }, "Start"),
+        h("button", { key: "done", className: "success", onClick: () => patch("tasks", task.id, { status: "Done" }, "Task completed.") }, "Done")
+      ]
+    })))
   );
 }
 
-function Vendor({ data, refresh, setNotice }) {
-  async function updateRequest(request, status) {
-    await api(`/sourcingRequests/${request.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-    setNotice(`Request ${status.toLowerCase()}.`);
-    refresh();
-  }
-
-  async function updateDelivery(delivery, status) {
-    await api(`/deliveries/${delivery.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-    setNotice("Delivery status updated.");
+function VendorPage({ page, data, refresh, setNotice }) {
+  async function patch(resource, id, payload, message) {
+    await api(`/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    setNotice(message);
     refresh();
   }
 
@@ -261,48 +606,70 @@ function Vendor({ data, refresh, setNotice }) {
     refresh();
   }
 
-  return h("div", { className: "wide-grid" },
-    h("div", { className: "panel" },
-      h("h2", null, "Vendor Requests"),
-      h("div", { className: "list" }, data.sourcingRequests.map(request => h(Card, {
-        key: request.id,
-        title: request.items,
-        meta: [request.status, request.deliveryDate, request.location],
-        actions: [
-          h("button", { key: "accept", className: "success", onClick: () => updateRequest(request, "Accepted") }, "Accept"),
-          h("button", { key: "decline", className: "warn", onClick: () => updateRequest(request, "Declined") }, "Decline")
-        ]
-      }, h("p", null, request.note))))
-    ),
-    h("div", { className: "panel" },
-      h("h2", null, "Deliveries and Invoices"),
+  if (page === "profile") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Vendor Profile"),
+      h("div", { className: "grid" }, data.vendors.map(vendor => h(Card, {
+        key: vendor.id,
+        title: vendor.name,
+        meta: [vendor.location, vendor.status]
+      }, h("p", null, `${vendor.supplies}. ${vendor.pricing}`))))
+    );
+  }
+
+  if (page === "deliveries") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Delivery Management"),
       h("div", { className: "list" }, data.deliveries.map(delivery => h(Card, {
         key: delivery.id,
         title: data.events.find(event => event.id === delivery.eventId)?.name || delivery.eventId,
         meta: [delivery.status],
         actions: ["Preparing", "Out for Delivery", "Delivered"].map(status =>
-          h("button", { key: status, onClick: () => updateDelivery(delivery, status) }, status)
+          h("button", { key: status, onClick: () => patch("deliveries", delivery.id, { status }, "Delivery status updated.") }, status)
         )
-      }))),
-      h("h3", null, "Submit Invoice"),
-      h("form", { onSubmit: createInvoice, className: "form-grid" },
+      })))
+    );
+  }
+
+  if (page === "invoices") {
+    return h("div", { className: "wide-grid" },
+      h("form", { onSubmit: createInvoice, className: "panel form-stack" },
+        h("h2", null, "Submit Invoice"),
         h(Field, { label: "Vendor" }, h("select", { name: "vendorId" }, data.vendors.map(vendor => h("option", { key: vendor.id, value: vendor.id }, vendor.name)))),
         h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
         h(Field, { label: "Amount" }, h("input", { name: "amount", type: "number", required: true })),
-        h(Field, { label: "Breakdown" }, h("input", { name: "breakdown", required: true })),
-        h("button", { className: "primary" }, "Submit")
+        h(Field, { label: "Breakdown" }, h("textarea", { name: "breakdown", required: true })),
+        h("button", { className: "primary" }, "Submit invoice")
       ),
-      h("div", { className: "list" }, data.invoices.map(invoice => h(Card, {
-        key: invoice.id,
-        title: `${Number(invoice.amount).toLocaleString()} EGP`,
-        meta: [invoice.status, invoice.breakdown]
-      })))
-    )
+      h("section", { className: "panel" },
+        h("h2", null, "Invoice Status"),
+        h("div", { className: "list" }, data.invoices.map(invoice => h(Card, {
+          key: invoice.id,
+          title: `${Number(invoice.amount).toLocaleString()} EGP`,
+          meta: [invoice.status, invoice.breakdown]
+        })))
+      )
+    );
+  }
+
+  return h("section", { className: "panel" },
+    h("h2", null, "Incoming Sourcing Requests"),
+    h("div", { className: "list" }, data.sourcingRequests.map(request => h(Card, {
+      key: request.id,
+      title: request.items,
+      meta: [request.status, request.deliveryDate, request.location],
+      actions: [
+        h("button", { key: "accept", className: "success", onClick: () => patch("sourcingRequests", request.id, { status: "Accepted" }, "Request accepted.") }, "Accept"),
+        h("button", { key: "decline", className: "warn", onClick: () => patch("sourcingRequests", request.id, { status: "Declined" }, "Request declined.") }, "Decline"),
+        h("button", { key: "note", onClick: () => setNotice("Clarification note sent to organizer.") }, "Send note")
+      ]
+    }, h("p", null, request.note))))
   );
 }
 
-function Guest({ data, refresh, setNotice }) {
+function GuestPage({ page, data, refresh, setNotice }) {
   const guest = data.guests[0];
+  const guestEvent = data.events.find(event => event.id === guest.eventId) || data.events[0];
 
   async function updateRsvp(event) {
     event.preventDefault();
@@ -335,51 +702,63 @@ function Guest({ data, refresh, setNotice }) {
     refresh();
   }
 
-  return h("div", { className: "wide-grid" },
-    h("div", { className: "panel" },
-      h("h2", null, "Invitation"),
-      data.events.map(event => h(Card, {
-        key: event.id,
-        title: event.name,
-        meta: [event.date, event.time, event.dressCode]
-      }, h("p", null, event.agenda))),
-      h("h3", null, "RSVP"),
-      h("form", { onSubmit: updateRsvp, className: "form-grid" },
+  if (page === "rsvp") {
+    return h("section", { className: "panel" },
+      h("h2", null, "RSVP"),
+      h("form", { onSubmit: updateRsvp, className: "form-stack" },
         h(Field, { label: "Response" }, h("select", { name: "rsvp", defaultValue: guest.rsvp },
           ["Attending", "Not Attending", "Maybe"].map(item => h("option", { key: item, value: item }, item))
         )),
-        h(Field, { label: "Dietary preference" }, h("input", { name: "dietary", defaultValue: guest.dietary })),
+        h(Field, { label: "Dietary preference or special requirement" }, h("input", { name: "dietary", defaultValue: guest.dietary })),
         h("button", { className: "primary" }, "Save RSVP")
-      ),
-      h("h3", null, "Check-In QR Code"),
-      h("div", { className: "card" },
-        h("strong", null, `QR-${guest.id.toUpperCase()}-${guest.eventId.toUpperCase()}`),
-        h("p", { className: "muted" }, "Staff can confirm this code or search by name at the entrance.")
       )
-    ),
-    h("div", { className: "panel" },
-      h("h2", null, "Messages and Feedback"),
+    );
+  }
+
+  if (page === "messages") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Day-Of Communications"),
       h("div", { className: "list" }, data.messages.map(message => h(Card, {
         key: message.id,
         title: message.body,
         meta: [message.status, message.seenBy.includes(guest.id) ? "Seen" : "Received"]
-      }))),
-      h("h3", null, "Post-Event Feedback"),
+      })))
+    );
+  }
+
+  if (page === "feedback") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Post-Event Feedback"),
       h("form", { onSubmit: submitFeedback, className: "form-grid" },
         ["rating", "food", "venue", "organization"].map(name =>
           h(Field, { key: name, label: name[0].toUpperCase() + name.slice(1) }, h("input", { name, type: "number", min: "1", max: "5", required: true }))
         ),
         h(Field, { label: "Comments" }, h("textarea", { name: "comments", required: true })),
-        h("button", { className: "primary" }, "Submit")
+        h("button", { className: "primary" }, "Submit feedback")
       )
+    );
+  }
+
+  return h("div", { className: "wide-grid" },
+    h("section", { className: "panel" },
+      h("h2", null, "Invitation Details"),
+      h(Card, {
+        title: guestEvent.name,
+        meta: [guestEvent.date, guestEvent.time, guestEvent.dressCode]
+      }, h("p", null, guestEvent.agenda))
+    ),
+    h("section", { className: "panel" },
+      h("h2", null, "Check-In Code"),
+      h("div", { className: "qr-card" }, `QR-${guest.id.toUpperCase()}-${guest.eventId.toUpperCase()}`),
+      h("p", { className: "muted" }, "Present this code or your name to staff at the event entrance.")
     )
   );
 }
 
-function VenueOwner({ data, refresh, setNotice }) {
-  async function updateBooking(booking, status) {
-    await api(`/bookings/${booking.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-    setNotice(`Booking ${status.toLowerCase()}.`);
+function VenueOwnerPage({ page, data, refresh, setNotice }) {
+  async function patch(resource, id, payload, message) {
+    await api(`/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    setNotice(message);
     refresh();
   }
 
@@ -395,7 +774,7 @@ function VenueOwner({ data, refresh, setNotice }) {
         dimensions: form.get("dimensions"),
         amenities: form.get("amenities").split(",").map(item => item.trim()).filter(Boolean),
         pricePerDay: Number(form.get("pricePerDay")),
-        unavailableDates: [],
+        unavailableDates: String(form.get("unavailableDates") || "").split(",").map(item => item.trim()).filter(Boolean),
         active: true,
         ownerId: "user-5"
       })
@@ -405,48 +784,89 @@ function VenueOwner({ data, refresh, setNotice }) {
     refresh();
   }
 
-  return h("div", { className: "wide-grid" },
-    h("div", { className: "panel" },
-      h("h2", null, "Venue Listings"),
-      h("form", { onSubmit: createVenue, className: "form-grid" },
+  if (page === "profile") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Venue Owner Profile"),
+      h(Card, { title: "Karim Youssef", meta: ["Venue Owner", "Active"] },
+        h("p", null, "Company: Nile Venue Group"),
+        h("p", null, "Contact: karim@venues.example")
+      )
+    );
+  }
+
+  if (page === "listings") {
+    return h("div", { className: "wide-grid" },
+      h("form", { onSubmit: createVenue, className: "panel form-stack" },
+        h("h2", null, "Create Venue Listing"),
         h(Field, { label: "Name" }, h("input", { name: "name", required: true })),
         h(Field, { label: "Location" }, h("input", { name: "location", required: true })),
         h(Field, { label: "Capacity" }, h("input", { name: "capacity", type: "number", required: true })),
         h(Field, { label: "Dimensions" }, h("input", { name: "dimensions", required: true })),
         h(Field, { label: "Amenities" }, h("input", { name: "amenities", placeholder: "AV, Parking", required: true })),
+        h(Field, { label: "Unavailable dates" }, h("input", { name: "unavailableDates", placeholder: "2026-07-01, 2026-07-02" })),
         h(Field, { label: "Price per day" }, h("input", { name: "pricePerDay", type: "number", required: true })),
-        h("button", { className: "primary" }, "Create")
+        h("button", { className: "primary" }, "Create listing")
       ),
-      h("div", { className: "list" }, data.venues.map(venue => h(Card, {
-        key: venue.id,
-        title: venue.name,
-        meta: [venue.location, `${venue.capacity} guests`, venue.active ? "Active" : "Inactive"]
-      }, h("p", null, venue.amenities.join(", ")))))
-    ),
-    h("div", { className: "panel" },
-      h("h2", null, "Bookings and Reports"),
+      h("section", { className: "panel" },
+        h("h2", null, "Existing Listings"),
+        h("div", { className: "list" }, data.venues.map(venue => h(Card, {
+          key: venue.id,
+          title: venue.name,
+          meta: [venue.location, `${venue.capacity} guests`, venue.active ? "Active" : "Inactive"],
+          actions: [
+            h("button", { key: "toggle", onClick: () => patch("venues", venue.id, { active: !venue.active }, "Venue listing status updated.") }, venue.active ? "Deactivate" : "Reactivate")
+          ]
+        }, h("p", null, `${venue.dimensions}. ${venue.amenities.join(", ")}`))))
+      )
+    );
+  }
+
+  if (page === "bookings") {
+    return h("section", { className: "panel" },
+      h("h2", null, "Confirmed Bookings"),
+      h("div", { className: "list" }, data.bookings.filter(booking => booking.status === "Approved").map(booking => h(Card, {
+        key: booking.id,
+        title: booking.eventName,
+        meta: [booking.date, `${booking.attendees} attendees`, `${Number(booking.price || 0).toLocaleString()} EGP`]
+      }, h("p", null, booking.requirements))))
+    );
+  }
+
+  if (page === "reports") {
+    return h("section", { className: "panel" },
+      h("div", { className: "section-title" },
+        h("h2", null, "Performance And Reporting"),
+        h("div", { className: "actions" },
+          h("button", { onClick: () => downloadFile("venue-bookings.csv", csv(data.bookings), "text/csv") }, "Export bookings CSV"),
+          h("button", { onClick: () => window.print() }, "Print report")
+        )
+      ),
       h("div", { className: "grid" },
         h(Metric, { label: "Approved bookings", value: data.summary.venueOwner.totalBookings }),
         h(Metric, { label: "Pending requests", value: data.summary.venueOwner.pendingBookings }),
         h(Metric, { label: "Revenue", value: `${data.summary.venueOwner.revenue.toLocaleString()} EGP` })
-      ),
-      h("div", { className: "list" }, data.bookings.map(booking => h(Card, {
-        key: booking.id,
-        title: booking.eventName,
-        meta: [booking.status, booking.date, `${booking.attendees} attendees`],
-        actions: [
-          h("button", { key: "approve", className: "success", onClick: () => updateBooking(booking, "Approved") }, "Approve"),
-          h("button", { key: "decline", className: "warn", onClick: () => updateBooking(booking, "Declined") }, "Decline")
-        ]
-      }, h("p", null, booking.requirements))))
-    )
+      )
+    );
+  }
+
+  return h("section", { className: "panel" },
+    h("h2", null, "Booking Requests"),
+    h("div", { className: "list" }, data.bookings.map(booking => h(Card, {
+      key: booking.id,
+      title: booking.eventName,
+      meta: [booking.status, booking.date, `${booking.attendees} attendees`],
+      actions: [
+        h("button", { key: "approve", className: "success", onClick: () => patch("bookings", booking.id, { status: "Approved" }, "Booking approved.") }, "Approve"),
+        h("button", { key: "decline", className: "warn", onClick: () => patch("bookings", booking.id, { status: "Declined" }, "Booking declined.") }, "Decline"),
+        h("button", { key: "counter", onClick: () => setNotice("Counter-proposal sent to organizer.") }, "Counter proposal")
+      ]
+    }, h("p", null, booking.requirements))))
   );
 }
 
 function App() {
-  const roles = ["Organizer", "Staff", "Vendor", "Guest", "Venue Owner"];
-  const resources = ["users", "venues", "bookings", "events", "tasks", "budgets", "expenses", "vendors", "sourcingRequests", "deliveries", "invoices", "guests", "messages", "feedback", "layouts", "notifications"];
-  const [role, setRole] = React.useState("Organizer");
+  const [route, setRoute] = React.useState(parseHash());
+  const [user, setUser] = React.useState(null);
   const [data, setData] = React.useState(null);
   const [notice, setNotice] = React.useState("");
 
@@ -464,37 +884,32 @@ function App() {
 
   React.useEffect(() => {
     load().catch(error => setNotice(error.message));
+    const onHashChange = () => setRoute(parseHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   if (!data) {
     return h("main", { className: "workspace" }, h("p", null, "Loading event platform..."));
   }
 
-  const views = {
-    Organizer: h(Organizer, { data, refresh: load, setNotice }),
-    Staff: h(Staff, { data, refresh: load, setNotice }),
-    Vendor: h(Vendor, { data, refresh: load, setNotice }),
-    Guest: h(Guest, { data, refresh: load, setNotice }),
-    "Venue Owner": h(VenueOwner, { data, refresh: load, setNotice })
+  if (!user) {
+    return h(React.Fragment, null,
+      notice ? h("div", { className: "floating-notice" }, notice) : null,
+      h(Login, { data, setUser, refresh: load, setNotice })
+    );
+  }
+
+  const pageProps = { page: route.page, data, refresh: load, setNotice };
+  const pages = {
+    Organizer: h(OrganizerPage, pageProps),
+    Staff: h(StaffPage, pageProps),
+    Vendor: h(VendorPage, pageProps),
+    Guest: h(GuestPage, pageProps),
+    "Venue Owner": h(VenueOwnerPage, pageProps)
   };
 
-  return h(React.Fragment, null,
-    h("header", { className: "app-header" },
-      h("h1", null, "Event Management Platform"),
-      h("p", null, "A full-stack milestone implementation covering organizer, staff, vendor, guest, and venue owner journeys with live API-backed data.")
-    ),
-    h("nav", { className: "role-tabs", "aria-label": "Role workspaces" },
-      roles.map(item => h("button", {
-        key: item,
-        className: item === role ? "active" : "",
-        onClick: () => setRole(item)
-      }, item))
-    ),
-    h("main", { className: "workspace" },
-      notice ? h("div", { className: "status-line" }, notice) : null,
-      views[role]
-    )
-  );
+  return h(AppFrame, { user, route, setRoute, setUser, notice }, pages[user.role]);
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(h(App));
