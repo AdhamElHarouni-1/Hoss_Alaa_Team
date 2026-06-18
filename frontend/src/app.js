@@ -23,6 +23,7 @@ const resources = [
 const rolePages = {
   Organizer: [
     ["dashboard", "Dashboard"],
+    ["accounts", "Accounts"],
     ["venues", "Venue Search"],
     ["planning", "Planning"],
     ["vendors", "Vendors"],
@@ -223,6 +224,9 @@ function AppFrame({ user, route, setRoute, setUser, notice, children }) {
 function OrganizerPage({ page, data, refresh, setNotice }) {
   const [venueQuery, setVenueQuery] = React.useState({ location: "Cairo", minCapacity: 200, date: "2026-06-18" });
   const [taskStatus, setTaskStatus] = React.useState("");
+  const [staffFilter, setStaffFilter] = React.useState("");
+  const [guestFilter, setGuestFilter] = React.useState("");
+  const [vendorFilter, setVendorFilter] = React.useState("");
   const [draggedElement, setDraggedElement] = React.useState(null);
   const layout = data.layouts[0];
   const venues = data.venues.filter(venue =>
@@ -231,6 +235,22 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
     !(venue.unavailableDates || []).includes(venueQuery.date)
   );
   const tasks = data.tasks.filter(task => !taskStatus || task.status === taskStatus);
+  const staffMembers = data.users.filter(user =>
+    user.role === "Staff" &&
+    (!staffFilter || [user.speciality, user.status, user.name].join(" ").toLowerCase().includes(staffFilter.toLowerCase()))
+  );
+  const guests = data.guests.filter(guest =>
+    !guestFilter || [guest.name, guest.rsvp, guest.dietary, guest.checkInStatus, guest.eventId].join(" ").toLowerCase().includes(guestFilter.toLowerCase())
+  );
+  const vendors = data.vendors.filter(vendor =>
+    !vendorFilter || [vendor.name, vendor.location, vendor.supplies, vendor.status].join(" ").toLowerCase().includes(vendorFilter.toLowerCase())
+  );
+
+  async function patch(resource, id, payload, message) {
+    await api(`/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    setNotice(message);
+    refresh();
+  }
 
   async function createBooking(event) {
     event.preventDefault();
@@ -269,6 +289,98 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
     });
     event.currentTarget.reset();
     setNotice("Day-of communication sent to guests.");
+    refresh();
+  }
+
+  async function createStakeholder(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api("/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: form.get("name"),
+        email: form.get("email"),
+        role: form.get("role"),
+        speciality: form.get("speciality") || "",
+        company: form.get("company") || "",
+        status: "Active"
+      })
+    });
+    event.currentTarget.reset();
+    setNotice("Stakeholder account created.");
+    refresh();
+  }
+
+  async function createTask(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api("/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        eventId: form.get("eventId"),
+        title: form.get("title"),
+        status: "Pending",
+        dueDate: form.get("dueDate"),
+        assignedTo: form.get("assignedTo"),
+        speciality: form.get("speciality")
+      })
+    });
+    event.currentTarget.reset();
+    setNotice("Task created.");
+    refresh();
+  }
+
+  async function addBudgetItem(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api("/budgets", {
+      method: "POST",
+      body: JSON.stringify({
+        eventId: form.get("eventId"),
+        category: form.get("category"),
+        planned: Number(form.get("planned"))
+      })
+    });
+    event.currentTarget.reset();
+    setNotice("Planned budget item added.");
+    refresh();
+  }
+
+  async function addExpense(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api("/expenses", {
+      method: "POST",
+      body: JSON.stringify({
+        eventId: form.get("eventId"),
+        category: form.get("category"),
+        description: form.get("description"),
+        amount: Number(form.get("amount"))
+      })
+    });
+    event.currentTarget.reset();
+    setNotice("Actual expense recorded.");
+    refresh();
+  }
+
+  async function createSourcingRequest(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await api("/sourcingRequests", {
+      method: "POST",
+      body: JSON.stringify({
+        vendorId: form.get("vendorId"),
+        eventId: form.get("eventId"),
+        items: form.get("items"),
+        quantity: form.get("quantity"),
+        deliveryDate: form.get("deliveryDate"),
+        location: form.get("location"),
+        status: "Pending",
+        note: form.get("note")
+      })
+    });
+    event.currentTarget.reset();
+    setNotice("Sourcing request submitted to vendor.");
     refresh();
   }
 
@@ -321,6 +433,49 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
             meta: [task.status, task.dueDate, task.speciality]
           })))
         )
+      ),
+      h("section", { className: "panel section-gap" },
+        h("h2", null, "Notifications"),
+        h("div", { className: "list" }, data.notifications.map(notification => h(Card, {
+          key: notification.id,
+          title: notification.text,
+          meta: [notification.read ? "Read" : "Unread"],
+          actions: [
+            h("button", { key: "read", onClick: () => patch("notifications", notification.id, { read: true }, "Notification marked as read.") }, "Mark read")
+          ]
+        })))
+      )
+    );
+  }
+
+  if (page === "accounts") {
+    return h("div", { className: "wide-grid" },
+      h("section", { className: "panel" },
+        h("h2", null, "Create Stakeholder Accounts"),
+        h("form", { onSubmit: createStakeholder, className: "form-stack" },
+          h(Field, { label: "Name" }, h("input", { name: "name", required: true })),
+          h(Field, { label: "Email" }, h("input", { name: "email", type: "email", required: true })),
+          h(Field, { label: "Role" }, h("select", { name: "role" },
+            ["Staff", "Guest", "Vendor", "Venue Owner"].map(role => h("option", { key: role, value: role }, role))
+          )),
+          h(Field, { label: "Speciality" }, h("input", { name: "speciality", placeholder: "Catering, seating, logistics" })),
+          h(Field, { label: "Company" }, h("input", { name: "company", placeholder: "Vendor or venue owner company" })),
+          h("button", { className: "primary" }, "Create account")
+        )
+      ),
+      h("section", { className: "panel" },
+        h("h2", null, "Manage Accounts"),
+        h("div", { className: "list" }, data.users.map(user => h(Card, {
+          key: user.id,
+          title: user.name,
+          meta: [user.role, user.status, user.speciality || user.company || "Profile"],
+          actions: [
+            h("button", {
+              key: "toggle",
+              onClick: () => patch("users", user.id, { status: user.status === "Active" ? "Inactive" : "Active" }, "Account status updated.")
+            }, user.status === "Active" ? "Deactivate" : "Reactivate")
+          ]
+        }, h("p", null, user.email))))
       )
     );
   }
@@ -373,8 +528,28 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
           h("select", { value: taskStatus, onChange: e => setTaskStatus(e.target.value) },
             h("option", { value: "" }, "All task statuses"),
             ["Pending", "In Progress", "Done"].map(status => h("option", { key: status, value: status }, status))
-          )
+          ),
+          h("input", { value: staffFilter, onChange: e => setStaffFilter(e.target.value), placeholder: "Filter staff by speciality/status" })
         ),
+        h("h3", null, "Staff"),
+        h("div", { className: "list" }, staffMembers.map(user => h(Card, {
+          key: user.id,
+          title: user.name,
+          meta: [user.status, user.speciality || "No speciality"]
+        }, h("p", null, user.email)))),
+        h("h3", null, "Create Task"),
+        h("form", { onSubmit: createTask, className: "form-grid" },
+          h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
+          h(Field, { label: "Title" }, h("input", { name: "title", required: true })),
+          h(Field, { label: "Due date" }, h("input", { name: "dueDate", type: "date", required: true })),
+          h(Field, { label: "Speciality" }, h("input", { name: "speciality", required: true })),
+          h(Field, { label: "Assign to" }, h("select", { name: "assignedTo" },
+            h("option", { value: "" }, "Not yet assigned"),
+            data.users.filter(user => user.role === "Staff").map(user => h("option", { key: user.id, value: user.id }, user.name))
+          )),
+          h("button", { className: "primary" }, "Create")
+        ),
+        h("h3", null, "Tasks"),
         h("div", { className: "list" }, tasks.map(task => h(Card, {
           key: task.id,
           title: task.title,
@@ -400,6 +575,23 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
           }, item.label))
         ),
         h("h3", null, "Budget And Expenses"),
+        h("div", { className: "split-forms" },
+          h("form", { onSubmit: addBudgetItem, className: "form-stack compact-form" },
+            h("h4", null, "Add planned budget"),
+            h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
+            h(Field, { label: "Category" }, h("input", { name: "category", required: true })),
+            h(Field, { label: "Planned amount" }, h("input", { name: "planned", type: "number", required: true })),
+            h("button", { className: "primary" }, "Add budget")
+          ),
+          h("form", { onSubmit: addExpense, className: "form-stack compact-form" },
+            h("h4", null, "Record expense"),
+            h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
+            h(Field, { label: "Category" }, h("input", { name: "category", required: true })),
+            h(Field, { label: "Description" }, h("input", { name: "description", required: true })),
+            h(Field, { label: "Amount" }, h("input", { name: "amount", type: "number", required: true })),
+            h("button", { className: "primary" }, "Add expense")
+          )
+        ),
         h("div", { className: "grid" },
           ...data.budgets.map(item => h(Card, { key: item.id, title: item.category, meta: [`${item.planned.toLocaleString()} EGP planned`] })),
           ...data.expenses.map(item => h(Card, { key: item.id, title: item.description, meta: [item.category, `${item.amount.toLocaleString()} EGP actual`] }))
@@ -412,7 +604,8 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
     return h("div", { className: "wide-grid" },
       h("section", { className: "panel" },
         h("h2", null, "Vendor Directory"),
-        h("div", { className: "list" }, data.vendors.map(vendor => h(Card, {
+        h("input", { value: vendorFilter, onChange: e => setVendorFilter(e.target.value), placeholder: "Search vendors by name, supply, or location" }),
+        h("div", { className: "list section-gap" }, vendors.map(vendor => h(Card, {
           key: vendor.id,
           title: vendor.name,
           meta: [vendor.location, vendor.status]
@@ -420,6 +613,16 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
       ),
       h("section", { className: "panel" },
         h("h2", null, "Sourcing And Invoices"),
+        h("form", { onSubmit: createSourcingRequest, className: "form-grid" },
+          h(Field, { label: "Vendor" }, h("select", { name: "vendorId" }, data.vendors.map(vendor => h("option", { key: vendor.id, value: vendor.id }, vendor.name)))),
+          h(Field, { label: "Event" }, h("select", { name: "eventId" }, data.events.map(event => h("option", { key: event.id, value: event.id }, event.name)))),
+          h(Field, { label: "Items" }, h("input", { name: "items", required: true })),
+          h(Field, { label: "Quantity" }, h("input", { name: "quantity", required: true })),
+          h(Field, { label: "Delivery date" }, h("input", { name: "deliveryDate", type: "date", required: true })),
+          h(Field, { label: "Location" }, h("input", { name: "location", required: true })),
+          h(Field, { label: "Note" }, h("input", { name: "note", required: true })),
+          h("button", { className: "primary" }, "Submit request")
+        ),
         h("div", { className: "list" }, data.sourcingRequests.map(request => h(Card, {
           key: request.id,
           title: request.items,
@@ -428,7 +631,11 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
         h("div", { className: "list section-gap" }, data.invoices.map(invoice => h(Card, {
           key: invoice.id,
           title: `${Number(invoice.amount).toLocaleString()} EGP invoice`,
-          meta: [invoice.status, invoice.breakdown]
+          meta: [invoice.status, invoice.breakdown],
+          actions: [
+            h("button", { key: "approve", className: "success", onClick: () => patch("invoices", invoice.id, { status: "Approved" }, "Invoice approved.") }, "Approve"),
+            h("button", { key: "paid", onClick: () => patch("invoices", invoice.id, { status: "Paid" }, "Invoice marked as paid.") }, "Mark paid")
+          ]
         })))
       )
     );
@@ -437,7 +644,8 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
   if (page === "guests") {
     return h("section", { className: "panel" },
       h("h2", null, "Guest Management"),
-      h("div", { className: "list" }, data.guests.map(guest => h(Card, {
+      h("input", { value: guestFilter, onChange: e => setGuestFilter(e.target.value), placeholder: "Filter guests by event, RSVP, dietary preference, or check-in status" }),
+      h("div", { className: "list section-gap" }, guests.map(guest => h(Card, {
         key: guest.id,
         title: guest.name,
         meta: [guest.rsvp, guest.checkInStatus, guest.dietary, guest.invitationSent ? "Invited" : "Not invited"],
@@ -582,6 +790,9 @@ function StaffPage({ page, data, refresh, setNotice }) {
 }
 
 function VendorPage({ page, data, refresh, setNotice }) {
+  const [deliveryFilter, setDeliveryFilter] = React.useState("");
+  const deliveries = data.deliveries.filter(delivery => !deliveryFilter || delivery.status === deliveryFilter);
+
   async function patch(resource, id, payload, message) {
     await api(`/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
     setNotice(message);
@@ -620,14 +831,28 @@ function VendorPage({ page, data, refresh, setNotice }) {
   if (page === "deliveries") {
     return h("section", { className: "panel" },
       h("h2", null, "Delivery Management"),
-      h("div", { className: "list" }, data.deliveries.map(delivery => h(Card, {
+      h("div", { className: "toolbar" },
+        h("select", { value: deliveryFilter, onChange: e => setDeliveryFilter(e.target.value) },
+          h("option", { value: "" }, "All delivery statuses"),
+          ["Preparing", "Out for Delivery", "Delivered"].map(status => h("option", { key: status, value: status }, status))
+        )
+      ),
+      h("div", { className: "list" }, deliveries.map(delivery => h(Card, {
         key: delivery.id,
         title: data.events.find(event => event.id === delivery.eventId)?.name || delivery.eventId,
         meta: [delivery.status],
         actions: ["Preparing", "Out for Delivery", "Delivered"].map(status =>
           h("button", { key: status, onClick: () => patch("deliveries", delivery.id, { status }, "Delivery status updated.") }, status)
-        )
-      })))
+        ).concat([
+          h("button", {
+            key: "delay",
+            onClick: () => {
+              const delayNote = window.prompt("Delay or schedule change note", delivery.delayNote || "Traffic delay, new ETA 30 minutes");
+              if (delayNote) patch("deliveries", delivery.id, { delayNote }, "Delay note sent to organizer.");
+            }
+          }, "Notify delay")
+        ])
+      }, delivery.delayNote ? h("p", null, delivery.delayNote) : null)))
     );
   }
 
@@ -670,6 +895,13 @@ function VendorPage({ page, data, refresh, setNotice }) {
 function GuestPage({ page, data, refresh, setNotice }) {
   const guest = data.guests[0];
   const guestEvent = data.events.find(event => event.id === guest.eventId) || data.events[0];
+
+  async function markMessageSeen(message) {
+    const seenBy = Array.from(new Set([...(message.seenBy || []), guest.id]));
+    await api(`/messages/${message.id}`, { method: "PATCH", body: JSON.stringify({ seenBy }) });
+    setNotice("Message marked as seen.");
+    refresh();
+  }
 
   async function updateRsvp(event) {
     event.preventDefault();
@@ -721,7 +953,10 @@ function GuestPage({ page, data, refresh, setNotice }) {
       h("div", { className: "list" }, data.messages.map(message => h(Card, {
         key: message.id,
         title: message.body,
-        meta: [message.status, message.seenBy.includes(guest.id) ? "Seen" : "Received"]
+        meta: [message.status, message.seenBy.includes(guest.id) ? "Seen" : "Received"],
+        actions: !message.seenBy.includes(guest.id) ? [
+          h("button", { key: "seen", onClick: () => markMessageSeen(message) }, "Mark seen")
+        ] : []
       })))
     );
   }
@@ -756,6 +991,9 @@ function GuestPage({ page, data, refresh, setNotice }) {
 }
 
 function VenueOwnerPage({ page, data, refresh, setNotice }) {
+  const [bookingFilter, setBookingFilter] = React.useState("");
+  const ownerBookings = data.bookings.filter(booking => !bookingFilter || booking.status === bookingFilter);
+
   async function patch(resource, id, payload, message) {
     await api(`/${resource}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
     setNotice(message);
@@ -814,7 +1052,17 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
           title: venue.name,
           meta: [venue.location, `${venue.capacity} guests`, venue.active ? "Active" : "Inactive"],
           actions: [
-            h("button", { key: "toggle", onClick: () => patch("venues", venue.id, { active: !venue.active }, "Venue listing status updated.") }, venue.active ? "Deactivate" : "Reactivate")
+            h("button", { key: "toggle", onClick: () => patch("venues", venue.id, { active: !venue.active }, "Venue listing status updated.") }, venue.active ? "Deactivate" : "Reactivate"),
+            h("button", {
+              key: "availability",
+              onClick: () => {
+                const unavailableDates = window.prompt("Unavailable dates, comma separated", (venue.unavailableDates || []).join(", "));
+                if (unavailableDates !== null) {
+                  patch("venues", venue.id, { unavailableDates: unavailableDates.split(",").map(item => item.trim()).filter(Boolean) }, "Availability calendar updated.");
+                }
+              }
+            }, "Set availability"),
+            h("button", { key: "remove", className: "warn", onClick: () => patch("venues", venue.id, { active: false, removed: true }, "Venue listing removed from active listings.") }, "Remove")
           ]
         }, h("p", null, `${venue.dimensions}. ${venue.amenities.join(", ")}`))))
       )
@@ -851,7 +1099,13 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
 
   return h("section", { className: "panel" },
     h("h2", null, "Booking Requests"),
-    h("div", { className: "list" }, data.bookings.map(booking => h(Card, {
+    h("div", { className: "toolbar" },
+      h("select", { value: bookingFilter, onChange: e => setBookingFilter(e.target.value) },
+        h("option", { value: "" }, "All booking statuses"),
+        ["Pending", "Approved", "Declined"].map(status => h("option", { key: status, value: status }, status))
+      )
+    ),
+    h("div", { className: "list" }, ownerBookings.map(booking => h(Card, {
       key: booking.id,
       title: booking.eventName,
       meta: [booking.status, booking.date, `${booking.attendees} attendees`],
