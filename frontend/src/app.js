@@ -62,7 +62,7 @@ const rolePages = {
 
 function statusClass(status) {
   if (["Approved", "Accepted", "Arrived", "Done", "Delivered", "Paid", "Attending", "Active"].includes(status)) return "green";
-  if (["Pending", "Maybe", "Preparing", "Pending Review", "In Progress", "Out for Delivery"].includes(status)) return "amber";
+  if (["Pending", "Maybe", "Preparing", "Pending Review", "In Progress", "Out for Delivery", "Counter Proposed"].includes(status)) return "amber";
   if (["Declined", "Not Attending", "Not Arrived", "Inactive"].includes(status)) return "rose";
   return "";
 }
@@ -340,6 +340,28 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
     });
     event.currentTarget.reset();
     setNotice("Day-of communication sent to guests.");
+    refresh();
+  }
+
+  async function sendFollowUp(message) {
+    const unseenGuests = data.guests.filter(guest => !(message.seenBy || []).includes(guest.id));
+    if (!unseenGuests.length) {
+      setNotice("All guests have already seen this message.");
+      return;
+    }
+    await api("/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        eventId: message.eventId,
+        body: `Follow-up: ${message.body}`,
+        audience: "Unseen guests",
+        recipientIds: unseenGuests.map(guest => guest.id),
+        status: "Sent",
+        seenBy: [],
+        followUpTo: message.id
+      })
+    });
+    setNotice(`Follow-up sent to ${unseenGuests.length} guest(s).`);
     refresh();
   }
 
@@ -754,7 +776,7 @@ function OrganizerPage({ page, data, refresh, setNotice }) {
           key: message.id,
           title: message.body,
           meta: [message.status, `${message.seenBy.length} seen`],
-          actions: [h("button", { key: "follow", onClick: () => setNotice("Follow-up message queued for guests who have not seen it.") }, "Send follow-up")]
+          actions: [h("button", { key: "follow", onClick: () => sendFollowUp(message) }, "Send follow-up")]
         })))
       )
     );
@@ -892,6 +914,33 @@ function VendorPage({ page, data, refresh, setNotice }) {
     refresh();
   }
 
+  async function sendClarification(request) {
+    const note = window.prompt("Clarification note for the organizer", "Please confirm the delivery entrance and contact person.");
+    if (!note) return;
+    const clarificationNotes = [...(request.clarificationNotes || []), {
+      text: note,
+      sentAt: new Date().toISOString(),
+      sender: "Vendor"
+    }];
+    await api(`/sourcingRequests/${request.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ clarificationNotes })
+    });
+    await api("/outbox", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "clarification",
+        recipientGroup: "Organizer",
+        subject: `Clarification for ${request.items}`,
+        body: note,
+        status: "Queued",
+        relatedId: request.id
+      })
+    });
+    setNotice("Clarification note sent to organizer.");
+    refresh();
+  }
+
   if (page === "profile") {
     return h("section", { className: "panel" },
       h("h2", null, "Vendor Profile"),
@@ -961,9 +1010,12 @@ function VendorPage({ page, data, refresh, setNotice }) {
       actions: [
         h("button", { key: "accept", className: "success", onClick: () => patch("sourcingRequests", request.id, { status: "Accepted" }, "Request accepted.") }, "Accept"),
         h("button", { key: "decline", className: "warn", onClick: () => patch("sourcingRequests", request.id, { status: "Declined" }, "Request declined.") }, "Decline"),
-        h("button", { key: "note", onClick: () => setNotice("Clarification note sent to organizer.") }, "Send note")
+        h("button", { key: "note", onClick: () => sendClarification(request) }, "Send note")
       ]
-    }, h("p", null, request.note))))
+    },
+      h("p", null, request.note),
+      (request.clarificationNotes || []).map((note, index) => h("p", { key: index, className: "muted" }, `Clarification: ${note.text}`))
+    )))
   );
 }
 
@@ -1100,6 +1152,38 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
     refresh();
   }
 
+  async function sendCounterProposal(booking) {
+    const proposedPrice = window.prompt("Proposed price (EGP)", String(booking.price || ""));
+    if (!proposedPrice) return;
+    const alternativeDate = window.prompt("Alternative date (YYYY-MM-DD)", booking.date);
+    if (!alternativeDate) return;
+    const note = window.prompt("Message to organizer", "We can host your event with the following adjusted terms.");
+    if (!note) return;
+    const counterProposal = {
+      price: Number(proposedPrice),
+      alternativeDate,
+      note,
+      sentAt: new Date().toISOString()
+    };
+    await api(`/bookings/${booking.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "Counter Proposed", counterProposal })
+    });
+    await api("/outbox", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "counter-proposal",
+        recipientGroup: "Organizer",
+        subject: `Counter proposal for ${booking.eventName}`,
+        body: `${note} Proposed price: ${proposedPrice} EGP. Alternative date: ${alternativeDate}.`,
+        status: "Queued",
+        relatedId: booking.id
+      })
+    });
+    setNotice("Counter-proposal sent to organizer.");
+    refresh();
+  }
+
   async function uploadVenueFile(venue, event, field) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1205,7 +1289,7 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
     h("div", { className: "toolbar" },
       h("select", { value: bookingFilter, onChange: e => setBookingFilter(e.target.value) },
         h("option", { value: "" }, "All booking statuses"),
-        ["Pending", "Approved", "Declined"].map(status => h("option", { key: status, value: status }, status))
+        ["Pending", "Counter Proposed", "Approved", "Declined"].map(status => h("option", { key: status, value: status }, status))
       )
     ),
     h("div", { className: "list" }, ownerBookings.map(booking => h(Card, {
@@ -1215,9 +1299,12 @@ function VenueOwnerPage({ page, data, refresh, setNotice }) {
       actions: [
         h("button", { key: "approve", className: "success", onClick: () => patch("bookings", booking.id, { status: "Approved" }, "Booking approved.") }, "Approve"),
         h("button", { key: "decline", className: "warn", onClick: () => patch("bookings", booking.id, { status: "Declined" }, "Booking declined.") }, "Decline"),
-        h("button", { key: "counter", onClick: () => setNotice("Counter-proposal sent to organizer.") }, "Counter proposal")
+        h("button", { key: "counter", onClick: () => sendCounterProposal(booking) }, "Counter proposal")
       ]
-    }, h("p", null, booking.requirements))))
+    },
+      h("p", null, booking.requirements),
+      booking.counterProposal ? h("p", { className: "muted" }, `Counter: ${booking.counterProposal.price.toLocaleString()} EGP on ${booking.counterProposal.alternativeDate}. ${booking.counterProposal.note}`) : null
+    )))
   );
 }
 

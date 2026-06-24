@@ -48,3 +48,7 @@ The user reported that requirements were still missing. The assistant added more
 ## Full Requirements Follow-Up
 
 The user asked to include everything without simplifying. The assistant added backend password authentication, server report generation, communication outbox records, real venue photo/floor-plan file uploads stored in the database, scannable QR-code images, floor-plan SVG image export, calendar views, and updated seed data with password hashes and upload-ready venue records. The assistant noted that actual external email/SMS delivery requires provider credentials.
+
+## Button Functionality Fix
+
+The user reported that some buttons did not work. The assistant audited the frontend and found three placeholder actions: organizer follow-up messages, vendor clarification notes, and venue-owner counter proposals. These were replaced with persistent API/database operations, UI refreshes, outbox records, and visible saved details. The flows were tested against a temporary server and the database was restored after testing.
